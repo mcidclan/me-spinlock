@@ -14,16 +14,9 @@ extern char __stop__me_section;
 __attribute__((section("_me_section")))
 void meHandler() {
   reg(0xbc100050) = 0b100; // we need this
-  _dcache_writeback_invalid_all();
-  
-  reg(0xbc100004) = 0xFFFFFFFF; // clear all interrupts
-  reg(0xbc100040) = 0x02; // allow 64MB ram 
-  // disable memory Protection
-  regPtr ptr = (regPtr)0xBC000000;
-  while (ptr <= (regPtr)0xBC00000C) {
-    *(ptr++) = 0xFFFFFFFF;
-  }
-  _dcache_writeback_invalid_all();
+  reg(0xbc100004) = 0xFFFFFFFF; // clear all interrupts, just usefull
+  reg(0xbc100040) = 0x02; // allow 64MB ram, probably better (default is 16MB)
+  asm("sync");
   
   volatile MeCom* const meCom = (volatile MeCom* const)(ME_SECTION_END_ADDR);
   while (1) {
@@ -32,17 +25,15 @@ void meHandler() {
       break;
     }
   }
-  reg(0xBC100050) = 0b0;
-  _dcache_writeback_invalid_all();
 }
 
 void me_init(MeCom* const meCom){
   volatile MeCom* const _meCom = (volatile MeCom* const)(ME_SECTION_END_ADDR);
   _memcpy((void*)_meCom, meCom, sizeof(MeCom));
   _memcpy((void *)ME_HANDLER_BASE, &__start__me_section, ME_SECTION_SIZE);
-  reg(0xBC10004C) = 0b0100; // just the me
-  sceKernelDcacheWritebackInvalidateAll();
-  reg(0xBC10004C) = 0b0;
+  reg(0xBC10004C) = 0b0100; // reset enable, just the me
+  asm("sync");
+  reg(0xBC10004C) = 0b0; // disable reset to start the me
   sceKernelDcacheWritebackInvalidateAll();
 }
 
