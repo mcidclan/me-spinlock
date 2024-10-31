@@ -1,6 +1,7 @@
 BINOUT = ./bin/
 PATHSRC = ./src/
-TARGET = $(BINOUT)ms_klib
+TARGET_NAME = mls_klib
+TARGET = $(BINOUT)$(TARGET_NAME)
 
 CC = psp-gcc
 LD = psp-gcc
@@ -18,8 +19,8 @@ LIBS = -lpspkernel -lpsppower
 
 release: all
 	psp-build-exports -s $(PATHSRC)exports.exp && \
-	mv ms_klib.S ../ && \
-	mv bin/ms_klib.prx ../bin
+	mv $(TARGET_NAME).S ../ && \
+	mv bin/$(TARGET_NAME).prx ../bin
   
 C_FILES = $(shell ls $(PATHSRC)*.c)
 OBJS = $(notdir $(patsubst %.c, %.o, $(C_FILES)))

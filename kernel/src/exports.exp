@@ -5,7 +5,7 @@ PSP_EXPORT_FUNC_HASH(module_start)
 PSP_EXPORT_VAR_HASH(module_info)
 PSP_EXPORT_END
 
-PSP_EXPORT_START(ms_klib, 0, 0x4001)
+PSP_EXPORT_START(mls_klib, 0, 0x4001)
 PSP_EXPORT_FUNC(me_init)
 PSP_EXPORT_FUNC(kernel_callback)
 PSP_EXPORT_END

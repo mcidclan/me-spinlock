@@ -66,7 +66,7 @@ int main(int argc, char **argv) {
   mem = (int*)memalign(16, sizeof(int) * 4);
   memset((void*)mem, 0, sizeof(int) * 4);
   
-  if (pspSdkLoadStartModule("ms0:/PSP/GAME/me/ms_klib.prx", PSP_MEMORY_PARTITION_KERNEL) < 0){
+  if (pspSdkLoadStartModule("ms0:/PSP/GAME/me/mls_klib.prx", PSP_MEMORY_PARTITION_KERNEL) < 0){
     sceKernelExitGame();
     return 0;
   }
