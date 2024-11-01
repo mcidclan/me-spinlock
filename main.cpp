@@ -89,12 +89,12 @@ int main(int argc, char **argv) {
       }
       mem[2]++;
       mem[1]++;
-      sceKernelDcacheWritebackInvalidateAll(); // push & pull
+      sceKernelDcacheWritebackInvalidateAll(); // cache to mem & invalidate (next read will fill)
       asm("sync");
       kernel_callback(&unlock);
     }
     
-    sceKernelDcacheWritebackAll(); // pull to be sure
+    sceKernelDcacheWritebackAll(); // cache to mem, keep its validity
     asm("sync");
 
     
