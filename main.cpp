@@ -15,7 +15,9 @@ bool stop = false;
 
 #define mutex reg(0xbc100048)
 #define getCpuId(var) asm volatile("mfc0 %0, $22" : "=r" (var))
-// $22 from cp0, 0(main cpu), 1(me)
+// reads processor id from cp0 register $22:
+// 0 = main cpu
+// 1 = me
 
 int unlock() {
   asm("sync");
@@ -32,7 +34,7 @@ int lock() {
     mutex = unique;
     asm("sync");
     if (mutex == unique) {
-      return 0; // Acquired lock
+      return 0; // acquired lock
     }
     asm("sync");
   } while (1);
@@ -89,15 +91,13 @@ int main(int argc, char **argv) {
       }
       mem[2]++;
       mem[1]++;
-      sceKernelDcacheWritebackInvalidateAll(); // cache to mem & invalidate (next read will fill)
+      sceKernelDcacheWritebackInvalidateAll(); // push cache to mem & invalidate (next read will fill)
       asm("sync");
       kernel_callback(&unlock);
     }
     
-    sceKernelDcacheWritebackAll(); // cache to mem, keep its validity
-    asm("sync");
+    sceKernelDcacheWritebackAll(); // push cache to mem, keep its validity
 
-    
     sceCtrlPeekBufferPositive(&ctl, 1);
     pspDebugScreenSetXY(0, 1);
     pspDebugScreenPrintf("                                                   ");
@@ -114,7 +114,6 @@ int main(int argc, char **argv) {
   
   stop = true;
   sceKernelDcacheWritebackInvalidateAll();
-  asm("sync");
   
   pspDebugScreenClear();
   pspDebugScreenSetXY(0, 1);
