@@ -18,11 +18,12 @@ extern "C" {
   int kernel_callback(MeFunc const func);
 
   inline void _dcache_writeback_invalid_all() {
-   for (int i = 0; i < 8192; i += 64) {
+    asm("sync");
+    for (int i = 0; i < 8192; i += 64) {
     __builtin_allegrex_cache(0x14, i);
     __builtin_allegrex_cache(0x14, i);
-   }
-   asm("sync");
+    }
+    asm("sync");
   }
   
   inline void _memcpy(void *d,  void *s, int size) {
