@@ -13,8 +13,7 @@ PSP_MAIN_THREAD_ATTR(PSP_THREAD_ATTR_VFPU | PSP_THREAD_ATTR_USER);
 int* mem = nullptr;
 bool stop = false;
 
-// uncached kernel mutex
-#define mutex reg((0xbc100048 | 0xA0000000))
+#define mutex reg(0xbc100048) // uncached kernel mutex
 #define getCpuId(var) asm volatile( \
   "sync\n" \
   "mfc0 %0, $22\n" \
