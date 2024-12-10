@@ -31,37 +31,32 @@ int lock() {
   unique = (unique & 1) + 1;
   volatile u32 delay = 1;
   do {
-    if (mutex == 0) { // check if the mutex is free
-      mutex = unique;
-      asm("sync");
-      if (mutex == unique) {
-        return 0; // lock acquired
-      }
+    mutex = mutex + unique;
+    asm("sync");
+    if (mutex == unique) {
+      return 0; // lock acquired
     }
     asm("sync");
     // exponential backoff
     for (volatile u32 i = 0; i < delay; i++) {
       asm("nop; nop; nop; nop; nop; nop; nop;"); // pipeline delay (7 stages)
     }
-    if (delay < 1024) {
+    if (delay < 128) {
       delay *= 2;
     }
   } while (1);
   return -1;
 }
 
-
 int tryLock() {
   volatile u32 unique;
   getCpuId(unique);
   unique = (unique & 1) + 1;
   asm("sync");
-  if (mutex == 0) {
-    mutex = unique;
-    asm("sync");
-    if (mutex == unique) {
-      return 0;
-    }
+  mutex = mutex + unique;
+  asm("sync");
+  if (mutex == unique) {
+    return 0;
   }
   return 1;
 }
@@ -79,7 +74,7 @@ static int meLoop() {
       mem[1] = 0;
     }
     unlock();
-    meDCacheWritebackInvalidAll();
+    meDCacheWritebackInvalidRange((u32)mem, sizeof(u32)*4);
   } while(!_meExit);
   return _meExit;
 }
@@ -133,10 +128,10 @@ int main() {
       }
       mem[2]++;
       mem[1]++;
-      sceKernelDelayThread(100000);
+      // sceKernelDelayThread(100000);
       kcall(&unlock);
     }
-    sceKernelDcacheWritebackInvalidateAll(); // push cache to mem & invalidate (next read will fill)
+    sceKernelDcacheWritebackInvalidateRange((void*)mem, sizeof(u32)*4); // push cache to mem & invalidate (next read will fill)
     sceCtrlPeekBufferPositive(&ctl, 1);
     pspDebugScreenSetXY(0, 1);
     pspDebugScreenPrintf("                                                   ");

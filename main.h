@@ -34,3 +34,21 @@ static inline void meExit() {
   _meExit = true;
   meDCacheWritebackInvalidAll();
 }
+
+inline void meDCacheWritebackInvalidRange(const u32 addr, const u32 size) {
+  u32 start = addr;
+  u32 end = start + size;
+  start &= ~(64 - 1);
+  end = (end + 63) & ~(63);
+  asm volatile("sync");
+  for (unsigned long i = start; i < end; i += 64) {
+      asm volatile(
+          "cache 0x1b, 0(%0)\n"
+          "sync\n"
+          "cache 0x1b, 0(%0)\n"
+          "sync\n"
+          :: "r"(i)
+      );
+  }
+  asm volatile("sync");
+}
