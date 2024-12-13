@@ -51,8 +51,8 @@ int tryLock() {
 }
 
 // note:
-// it appears that the Me can read the mutex and only set bit[0],
-// while the main CPU can read the mutex and only set bit[1]
+// it appears that the main CPU can read the mutex and only set bit[0],
+// while the Me can read the mutex and only set bit[1]
 
 __attribute__((noinline, aligned(4)))
 static int meLoop() {
