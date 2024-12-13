@@ -47,7 +47,7 @@ static inline u32 getlocalUID() {
     "sync"
     : "=r" (unique)
   );
-  return unique + 1;
+  return (unique + 1) & 3;
   // reads processor id from cp0 register $22
   // 0 = main cpu
   // 1 = me

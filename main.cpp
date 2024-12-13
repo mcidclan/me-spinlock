@@ -28,7 +28,7 @@ int lock() {
   do {
     mutex = unique; // the main CPU can affect only bit[0] (0b01), while the Me can only affect bit[1] (0b10)
     asm volatile("sync");
-    if (!(((mutex & 3) ^ mutex))) { // if mutex == 0b11, there is a conflict, and it can't be acquired
+    if (!(((mutex & 3) ^ unique))) { // if mutex == 0b11, there is a conflict, and it can't be acquired
       return 0; // lock acquired
     }
     // gives a breath with a pipeline delay (7 stages)
@@ -43,7 +43,7 @@ int tryLock() {
   const u32 unique = getlocalUID();
   mutex = unique;
   asm volatile("sync");
-  if (!(((mutex & 3) ^ mutex))) {
+  if (!(((mutex & 3) ^ unique))) {
     return 0; // lock acquired
   }
   asm volatile("sync"); // make sure to be sync before leaving kernel mode
@@ -119,7 +119,7 @@ int main() {
   SceCtrlData ctl;
   u32 counter = 0;
   bool switchMessage = false;
-  do {    
+  do {
     // push cache to memory and invalidate it, refill cache during the next access
     sceKernelDcacheWritebackInvalidateRange((void*)mem, sizeof(u32) * 4);
     
