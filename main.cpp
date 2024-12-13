@@ -5,7 +5,7 @@ PSP_HEAP_SIZE_KB(-1024);
 PSP_MAIN_THREAD_ATTR(PSP_THREAD_ATTR_VFPU | PSP_THREAD_ATTR_USER);
 
 volatile u32* mem = nullptr;
-#define memReady mem[3]
+#define meStart mem[3]
 #define mutex vrg(0xbc100048) // non-cached kernel mutex
 
 // kernel function to unlock the mutex
@@ -59,7 +59,7 @@ static int meLoop() {
   // wait until mem is ready
   do {
     meDCacheWritebackInvalidAll();
-  } while(!mem || !memReady);
+  } while(!mem || !meStart);
   do {
     // push cache to memory and invalidate it, refill cache during the next access
     meDCacheWritebackInvalidRange((u32)mem, sizeof(u32)*4);
@@ -98,6 +98,15 @@ static int initMe() {
   return 0;
 }
 
+bool releaseMutex() {
+  static u32 hold = 100;
+  if (hold-- > 0) {
+    return false;
+  }
+  hold = 100;
+  return true;
+}
+
 int main() {
   scePowerSetClockFrequency(333, 333, 166);
   if (pspSdkLoadStartModule("ms0:/PSP/GAME/me/kcall.prx", PSP_MEMORY_PARTITION_KERNEL) < 0){
@@ -111,7 +120,6 @@ int main() {
   // to use DCWBInv Range, 64-byte alignment is required (not necessary while using DCWBInv All)
   mem = (u32*)memalign(64, (sizeof(u32) * 4 + 63) & ~63);
   memset((void*)mem, 0, sizeof(u32) * 4);
-  memReady = 1;
   sceKernelDcacheWritebackInvalidateAll();
 
   pspDebugScreenInit();
@@ -132,7 +140,11 @@ int main() {
       mem[2]++;
       mem[1]++;
       // sceKernelDelayThread(10000);
-      kcall((FCall)(0x80000000 | (u32)&unlock));
+      
+      // proof to visualize the release of the mutex and its effect on the counter (mem[0]) running on the Me
+      if (releaseMutex()) {
+        kcall((FCall)(0x80000000 | (u32)&unlock));
+      }
     }
     
     sceCtrlPeekBufferPositive(&ctl, 1);
@@ -147,6 +159,9 @@ int main() {
       pspDebugScreenPrintf("xxxxxx");
     }
     sceDisplayWaitVblankStart();
+    
+    // start the process on the Me after the first cycle of the main loop
+    meStart = 1;
   } while(!(ctl.Buttons & PSP_CTRL_HOME));
   
   // exit me
