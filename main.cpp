@@ -5,76 +5,71 @@ PSP_HEAP_SIZE_KB(-1024);
 PSP_MAIN_THREAD_ATTR(PSP_THREAD_ATTR_VFPU | PSP_THREAD_ATTR_USER);
 
 volatile u32* mem = nullptr;
+#define memReady mem[3]
+#define mutex vrg(0xbc100048) // non-cached kernel mutex
 
-#define mutex vrg(0xbc100048) // uncached kernel mutex
-
-// reads processor id from cp0 register $22:
-// 0 = main cpu
-// 1 = me
-#define getCpuId(var) asm volatile( \
-  "sync\n" \
-  "mfc0 %0, $22\n" \
-  "sync" \
-  : "=r" (var) \
-)
-
+// kernel function to unlock the mutex
+__attribute__((noinline, aligned(4)))
 int unlock() {
-  asm("sync");
+  // if acquired, briefly holds the lock with a pipeline delay,
+  // allowing cache operations to complete, could be useful
+  asm volatile("nop; nop; nop; nop; nop; nop; nop;");
   mutex = 0;
-  asm("sync");
+  asm volatile("sync");
+  // provides opportunities for others with a pipeline delay
+  asm volatile("nop; nop; nop; nop; nop; nop; nop;");
   return 0;
 }
 
+// kernel function that waits and attempts to lock and acquire the mutex
+__attribute__((noinline, aligned(4)))
 int lock() {
-  volatile u32 unique;
-  getCpuId(unique); // get cpu id as a unique id
-  unique = (unique & 1) + 1;
-  volatile u32 delay = 1;
+  const u32 unique = getlocalUID();
   do {
-    mutex = mutex + unique;
-    asm("sync");
-    if (mutex == unique) {
+    mutex = unique; // the main CPU can affect only bit[0] (0b01), while the Me can only affect bit[1] (0b10)
+    asm volatile("sync");
+    if (!(((mutex & 3) ^ mutex))) { // if mutex == 0b11, there is a conflict, and it can't be acquired
       return 0; // lock acquired
     }
-    asm("sync");
-    // exponential backoff
-    for (volatile u32 i = 0; i < delay; i++) {
-      asm("nop; nop; nop; nop; nop; nop; nop;"); // pipeline delay (7 stages)
-    }
-    if (delay < 128) {
-      delay *= 2;
-    }
+    // gives a breath with a pipeline delay (7 stages)
+    asm volatile("nop; nop; nop; nop; nop; nop; nop;");
   } while (1);
-  return -1;
-}
-
-int tryLock() {
-  volatile u32 unique;
-  getCpuId(unique);
-  unique = (unique & 1) + 1;
-  asm("sync");
-  mutex = mutex + unique;
-  asm("sync");
-  if (mutex == unique) {
-    return 0;
-  }
   return 1;
 }
 
+// kernel function to attempt locking and acquiring the mutex
+__attribute__((noinline, aligned(4)))
+int tryLock() {
+  const u32 unique = getlocalUID();
+  mutex = unique;
+  asm volatile("sync");
+  if (!(((mutex & 3) ^ mutex))) {
+    return 0; // lock acquired
+  }
+  asm volatile("sync"); // make sure to be sync before leaving kernel mode
+  return 1;
+}
+
+// note:
+// it appears that the Me can read the mutex and only set bit[0],
+// while the main CPU can read the mutex and only set bit[1]
+
 __attribute__((noinline, aligned(4)))
 static int meLoop() {
-  // Wait until mem is ready
-  while (!mem) {
-    meDCacheWritebackInvalidAll();
-  }
+  // wait until mem is ready
   do {
+    meDCacheWritebackInvalidAll();
+  } while(!mem || !memReady);
+  do {
+    // push cache to memory and invalidate it, refill cache during the next access
+    meDCacheWritebackInvalidRange((u32)mem, sizeof(u32)*4);
+    
     lock();
     mem[0]++;
     if (mem[1] > 100) {
       mem[1] = 0;
     }
     unlock();
-    meDCacheWritebackInvalidRange((u32)mem, sizeof(u32)*4);
   } while(!_meExit);
   return _meExit;
 }
@@ -86,19 +81,20 @@ void meHandler() {
   vrg(0xbc100050) = 0x7f;       // enable clocks: ME, AW bus RegA, RegB & Edram, DMACPlus, DMAC
   vrg(0xbc100004) = 0xffffffff; // clear NMI
   vrg(0xbc100040) = 1;          // allow 32MB ram
-  asm("sync");
+  asm volatile("sync");
   ((FCall)_meLoop)();
 }
 
 static int initMe() {
   memcpy((void *)0xbfc00040, (void*)&__start__me_section, me_section_size);
-  _meLoop = (u32)&meLoop;
+  // Call meLoop, it is safer to invoke it with a kernel mask when using interrupts or spinlocks
+  _meLoop = 0x80000000 | (u32)&meLoop;
   meDCacheWritebackInvalidAll();
   // reset and start me
   vrg(0xBC10004C) = 0b100;
-  asm("sync");
+  asm volatile("sync");
   vrg(0xBC10004C) = 0x0;
-  asm("sync");
+  asm volatile("sync");
   return 0;
 }
 
@@ -108,37 +104,44 @@ int main() {
     sceKernelExitGame();
     return 0;
   }
-
+  
   // Init me before user mem initialisation
   kcall(&initMe);
   
-  mem = (u32*)memalign(16, sizeof(u32) * 4);
+  // to use DCWBInv Range, 64-byte alignment is required (not necessary while using DCWBInv All)
+  mem = (u32*)memalign(64, (sizeof(u32) * 4 + 63) & ~63);
   memset((void*)mem, 0, sizeof(u32) * 4);
+  memReady = 1;
   sceKernelDcacheWritebackInvalidateAll();
 
   pspDebugScreenInit();
   
   SceCtrlData ctl;
-  bool hello = false;
-  do {
-    if(!kcall(&tryLock)) {
-      hello = false;
+  u32 counter = 0;
+  bool switchMessage = false;
+  do {    
+    // push cache to memory and invalidate it, refill cache during the next access
+    sceKernelDcacheWritebackInvalidateRange((void*)mem, sizeof(u32) * 4);
+    
+    // functions that use spinlock, seem to need to be invoked with a kernel mask
+    if(!kcall((FCall)(0x80000000 | (u32)&tryLock))) {
+      switchMessage = false;
       if (mem[1] > 50) {
-        hello = true;
+        switchMessage = true;
       }
       mem[2]++;
       mem[1]++;
-      // sceKernelDelayThread(100000);
-      kcall(&unlock);
+      // sceKernelDelayThread(10000);
+      kcall((FCall)(0x80000000 | (u32)&unlock));
     }
-    sceKernelDcacheWritebackInvalidateRange((void*)mem, sizeof(u32)*4); // push cache to mem & invalidate (next read will fill)
+    
     sceCtrlPeekBufferPositive(&ctl, 1);
     pspDebugScreenSetXY(0, 1);
     pspDebugScreenPrintf("                                                   ");
     pspDebugScreenSetXY(0, 1);
-    pspDebugScreenPrintf("Counters %u; %u; %u;", mem[0], mem[1], mem[2]);
+    pspDebugScreenPrintf("Counters %u; %u; %u; %u", mem[0], mem[1], mem[2], counter++);
     pspDebugScreenSetXY(0, 2);
-    if (hello) {
+    if (switchMessage) {
       pspDebugScreenPrintf("Hello!");
     } else {
       pspDebugScreenPrintf("xxxxxx");

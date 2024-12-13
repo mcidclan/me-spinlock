@@ -31,4 +31,3 @@ $(PATHOBJS)%.o: $(PATHSRC)%.S
 
 $(PATHOBJS)%.o: $(PATHSRC)%.cpp
 	$(CXX) -o $@ -c $< $(CXXFLAGS)
-  
