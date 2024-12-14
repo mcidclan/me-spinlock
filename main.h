@@ -51,6 +51,18 @@ static inline void meDCacheInvalidRange(const u32 addr, const u32 size) {
   asm volatile("sync");
 }
 
+static inline void meDCacheWritebackRange(const u32 addr, const u32 size) {
+  asm volatile("sync");
+  for (volatile u32 i = addr; i < addr + size; i += 64) {
+    asm volatile(
+      "cache 0x1a, 0(%0)\n"
+      "cache 0x1a, 0(%0)\n"
+      :: "r"(i)
+    );
+  }
+  asm volatile("sync");
+}
+
 static inline u32 getlocalUID() {
   u32 unique;
   asm volatile(

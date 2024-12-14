@@ -65,7 +65,7 @@ static int meLoop() {
   } while(!vrg(0x40000000 | (u32)&meStart) || !mem);
   
   do {
-    // invalidate cache refreshing local data
+    // invalidate cache, forcing next read to fetch from memory
     meDCacheInvalidRange((u32)mem, sizeof(u32)*4);
 
     lock();
@@ -75,8 +75,8 @@ static int meLoop() {
     }
     unlock();
     
-    // push cache to memory and invalidate it, refill cache during the next access
-    meDCacheWritebackInvalidRange((u32)mem, sizeof(u32)*4);
+    // write modified cache data back to memory
+    meDCacheWritebackRange((u32)mem, sizeof(u32)*4);
   } while(!_meExit);
   return _meExit;
 }
@@ -140,7 +140,7 @@ int main() {
   vrg(0x40000000 | (u32)&meStart) = true;
   do {
 
-    // invalidate cache refreshing local data
+    // invalidate cache, forcing next read to fetch from memory
     sceKernelDcacheInvalidateRange((void*)mem, sizeof(u32) * 4);
     
     // functions that use spinlock, seem to need to be invoked with a kernel mask
