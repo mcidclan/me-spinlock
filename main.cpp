@@ -4,8 +4,10 @@ PSP_MODULE_INFO("mls", 0, 1, 1);
 PSP_HEAP_SIZE_KB(-1024);
 PSP_MAIN_THREAD_ATTR(PSP_THREAD_ATTR_VFPU | PSP_THREAD_ATTR_USER);
 
-volatile u32* mem = nullptr;
-#define meStart mem[3]
+// make sure to align cached shared variables to 64
+volatile u32* mem __attribute__((aligned(64))) = nullptr;
+volatile bool meStart __attribute__((aligned(64))) = false;
+
 #define mutex vrg(0xbc100048) // non-cached kernel mutex
 
 // kernel function to unlock the mutex
@@ -56,20 +58,25 @@ int tryLock() {
 
 __attribute__((noinline, aligned(4)))
 static int meLoop() {
-  // wait until mem is ready
+  // read meStart using the uncached mask, wait until the signal is received
+  // from the main CPU and ensure that the shared mem is ready
   do {
     meDCacheWritebackInvalidAll();
-  } while(!mem || !meStart);
+  } while(!vrg(0x40000000 | (u32)&meStart) || !mem);
+  
   do {
-    // push cache to memory and invalidate it, refill cache during the next access
-    meDCacheWritebackInvalidRange((u32)mem, sizeof(u32)*4);
-    
+    // invalidate cache refreshing local data
+    meDCacheInvalidRange((u32)mem, sizeof(u32)*4);
+
     lock();
     mem[0]++;
     if (mem[1] > 100) {
       mem[1] = 0;
     }
     unlock();
+    
+    // push cache to memory and invalidate it, refill cache during the next access
+    meDCacheWritebackInvalidRange((u32)mem, sizeof(u32)*4);
   } while(!_meExit);
   return _meExit;
 }
@@ -98,6 +105,7 @@ static int initMe() {
   return 0;
 }
 
+// function used to hold the mutex in the main loop as a proof
 bool releaseMutex() {
   static u32 hold = 100;
   if (hold-- > 0) {
@@ -127,9 +135,13 @@ int main() {
   SceCtrlData ctl;
   u32 counter = 0;
   bool switchMessage = false;
+
+  // start the process on the Me just before the main loop
+  vrg(0x40000000 | (u32)&meStart) = true;
   do {
-    // push cache to memory and invalidate it, refill cache during the next access
-    sceKernelDcacheWritebackInvalidateRange((void*)mem, sizeof(u32) * 4);
+
+    // invalidate cache refreshing local data
+    sceKernelDcacheInvalidateRange((void*)mem, sizeof(u32) * 4);
     
     // functions that use spinlock, seem to need to be invoked with a kernel mask
     if(!kcall((FCall)(0x80000000 | (u32)&tryLock))) {
@@ -146,10 +158,10 @@ int main() {
         kcall((FCall)(0x80000000 | (u32)&unlock));
       }
     }
-    // start the process on the Me after a first cycle of the main loop
-    // before the next read on the shared memory
-    meStart = 1;
     
+    // push cache to memory and invalidate it, refill cache during the next access
+    sceKernelDcacheWritebackInvalidateRange((void*)mem, sizeof(u32) * 4);
+
     sceCtrlPeekBufferPositive(&ctl, 1);
     pspDebugScreenSetXY(0, 1);
     pspDebugScreenPrintf("                                                   ");
