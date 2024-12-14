@@ -146,6 +146,9 @@ int main() {
         kcall((FCall)(0x80000000 | (u32)&unlock));
       }
     }
+    // start the process on the Me after a first cycle of the main loop
+    // before the next read on the shared memory
+    meStart = 1;
     
     sceCtrlPeekBufferPositive(&ctl, 1);
     pspDebugScreenSetXY(0, 1);
@@ -159,9 +162,6 @@ int main() {
       pspDebugScreenPrintf("xxxxxx");
     }
     sceDisplayWaitVblankStart();
-    
-    // start the process on the Me after the first cycle of the main loop
-    meStart = 1;
   } while(!(ctl.Buttons & PSP_CTRL_HOME));
   
   // exit me
