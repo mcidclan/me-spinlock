@@ -128,7 +128,7 @@ int main() {
   // to use DCWBInv Range, 64-byte alignment is required (not necessary while using DCWBInv All)
   mem = (u32*)memalign(64, (sizeof(u32) * 4 + 63) & ~63);
   memset((void*)mem, 0, sizeof(u32) * 4);
-  sceKernelDcacheWritebackInvalidateAll();
+  sceKernelDcacheWritebackAll();
 
   pspDebugScreenInit();
   
