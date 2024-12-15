@@ -115,10 +115,20 @@ bool releaseMutex() {
   return true;
 }
 
+void exitSample(const char* const str) {
+  pspDebugScreenClear();
+  pspDebugScreenSetXY(0, 1);
+  pspDebugScreenPrintf(str);
+  sceKernelDelayThread(1000000);
+  sceKernelExitGame();
+}
+
 int main() {
   scePowerSetClockFrequency(333, 333, 166);
+  pspDebugScreenInit();
+
   if (pspSdkLoadStartModule("ms0:/PSP/GAME/me/kcall.prx", PSP_MEMORY_PARTITION_KERNEL) < 0){
-    sceKernelExitGame();
+    exitSample("Can't load the PRX, exiting...");
     return 0;
   }
   
@@ -129,8 +139,6 @@ int main() {
   mem = (u32*)memalign(64, (sizeof(u32) * 4 + 63) & ~63);
   memset((void*)mem, 0, sizeof(u32) * 4);
   sceKernelDcacheWritebackAll();
-
-  pspDebugScreenInit();
   
   SceCtrlData ctl;
   u32 counter = 0;
@@ -180,10 +188,6 @@ int main() {
   meExit();
   free((void*)mem);
   
-  pspDebugScreenClear();
-  pspDebugScreenSetXY(0, 1);
-  pspDebugScreenPrintf("Exiting...");
-  sceKernelDelayThread(1000000);
-  sceKernelExitGame();
+  exitSample("Exiting...");
   return 0;
 }
