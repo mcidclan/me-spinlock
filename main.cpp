@@ -30,7 +30,7 @@ int lock() {
   do {
     mutex = unique; // the main CPU can affect only bit[0] (0b01), while the Me can only affect bit[1] (0b10)
     asm volatile("sync");
-    if (!(((mutex & 3) ^ unique))) { // if mutex == 0b11, there is a conflict, and it can't be acquired
+    if (!(((mutex & 3) ^ unique))) { // see note
       return 0; // lock acquired
     }
     // gives a breath with a pipeline delay (7 stages)
@@ -45,7 +45,7 @@ int tryLock() {
   const u32 unique = getlocalUID();
   mutex = unique;
   asm volatile("sync");
-  if (!(((mutex & 3) ^ unique))) {
+  if (!(((mutex & 3) ^ unique))) { // see note
     return 0; // lock acquired
   }
   asm volatile("sync"); // make sure to be sync before leaving kernel mode
@@ -55,6 +55,14 @@ int tryLock() {
 // note:
 // it appears that the main CPU can read the mutex and only set bit[0],
 // while the Me can read the mutex and only set bit[1]
+//
+// mutex    unique
+// 11  xor  01 =>   not 10 = 0
+// 11  xor  10 =>   not 01 = 0
+// 10  xor  01 =>   not 11 = 0
+// 10  xor  10 =>   not 00 = 1
+// 01  xor  01 =>   not 00 = 1
+// 01  xor  10 =>   not 11 = 0
 
 __attribute__((noinline, aligned(4)))
 static int meLoop() {
