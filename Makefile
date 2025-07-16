@@ -17,7 +17,7 @@ OBJS := $(sort $(OBJS:%.o=$(PATHOBJS)%.o))
 PSPSDK = $(shell psp-config --pspsdk-path)
 
 CFLAGS = -I. -I$(PSPSDK)/include -I/usr/local/pspdev/psp/sdk/include -Ofast -G0 -Wall -fno-pic \
-         -I./kernel/src -Wextra -Werror -D_PSP_FW_VERSION=360
+         -I./kernel/src -Wextra -Werror -D_PSP_FW_VERSION=660
 CXXFLAGS = $(CFLAGS) -fno-exceptions -fno-rtti -std=c++11
 ASFLAGS = $(CFLAGS) -x assembler-with-cpp
 LDFLAGS = -L. -L$(PSPSDK)/lib -L/usr/local/pspdev/psp/sdk/lib \

@@ -5,21 +5,24 @@ PSP_HEAP_SIZE_KB(-1024);
 PSP_MAIN_THREAD_ATTR(PSP_THREAD_ATTR_VFPU | PSP_THREAD_ATTR_USER);
 
 // make sure to align cached shared variables to 64
-volatile u32* mem __attribute__((aligned(64))) = nullptr;
-volatile bool meStart __attribute__((aligned(64))) = false;
+volatile u32* mem    __attribute__((aligned(64))) = nullptr;
+volatile u32* shared __attribute__((aligned(64))) = nullptr;
+#define meStart           (shared[0])
+#define meExit            (shared[1])
 
-#define mutex vrg(0xbc100048) // non-cached kernel mutex
+ // define the non-cached kernel mutex
+#define mutex hw(0xbc100048)
 
 // kernel function to unlock the mutex
 __attribute__((noinline, aligned(4)))
 int unlock() {
   // if acquired, briefly holds the lock with a pipeline delay,
   // allowing cache operations to complete, could be useful
-  asm volatile("nop; nop; nop; nop; nop; nop; nop;");
+  delayPipeline();
   mutex = 0;
   asm volatile("sync");
   // provides opportunities for others with a pipeline delay
-  asm volatile("nop; nop; nop; nop; nop; nop; nop;");
+  delayPipeline();
   return 0;
 }
 
@@ -34,7 +37,7 @@ int lock() {
       return 0; // lock acquired
     }
     // gives a breath with a pipeline delay (7 stages)
-    asm volatile("nop; nop; nop; nop; nop; nop; nop;");
+    delayPipeline();
   } while (1);
   return 1;
 }
@@ -65,12 +68,16 @@ int tryLock() {
 // 01  xor  10 =>   not 11 = 0
 
 __attribute__((noinline, aligned(4)))
-static int meLoop() {
-  // read meStart using the uncached mask, wait until the signal is received
-  // from the main CPU and ensure that the shared mem is ready
+static void meLoop() {
+  // ensure that the shared mem is ready
   do {
     meDCacheWritebackInvalidAll();
-  } while(!vrg(0x40000000 | (u32)&meStart) || !mem);
+  } while(!mem || !shared);
+
+  // wait until the start signal is receive from the main CPU
+  do {
+    delayPipeline();
+  } while (!meStart);
   
   do {
     // invalidate cache, forcing next read to fetch from memory
@@ -85,36 +92,50 @@ static int meLoop() {
     
     // write modified cache data back to memory
     meDCacheWritebackRange((u32)mem, sizeof(u32)*4);
-  } while(!_meExit);
-  return _meExit;
+  } while (meExit == 0);
+  
+  meExit = 2;
+  meHalt();
 }
 
 extern char __start__me_section;
 extern char __stop__me_section;
 __attribute__((section("_me_section"), noinline, aligned(4)))
 void meHandler() {
-  vrg(0xbc100050) = 0x7f;       // enable clocks: ME, AW bus RegA, RegB & Edram, DMACPlus, DMAC
-  vrg(0xbc100004) = 0xffffffff; // clear NMI
-  vrg(0xbc100040) = 1;          // allow 32MB ram
-  asm volatile("sync");
-  ((FCall)_meLoop)();
+  hw(0xbc100040) = 1;          // allow 32MB ram
+  hw(0xbc100050) = 0x06;       // enable AW RegA & RegB bus clocks
+  hw(0xbc100004) = 0xffffffff; // clear NMI
+  asm("sync");
+  
+  asm volatile(
+    "li          $k0, 0x30000000\n"
+    "mtc0        $k0, $12\n"
+    "sync\n"
+    // Call meLoop, making sure to invoke it with a kernel mask
+    "la          $k0, %0\n"
+    "li          $k1, 0x80000000\n"
+    "or          $k0, $k0, $k1\n"
+    "jr          $k0\n"
+    "nop\n"
+    :
+    : "i" (meLoop)
+    : "k0"
+  );
 }
 
 static int initMe() {
-  memcpy((void *)0xbfc00040, (void*)&__start__me_section, me_section_size);
-  // Call meLoop, it is safer to invoke it with a kernel mask when using interrupts or spinlocks
-  _meLoop = 0x80000000 | (u32)&meLoop;
-  meDCacheWritebackInvalidAll();
+  #define me_section_size (&__stop__me_section - &__start__me_section)
+  memcpy((void *)ME_HANDLER_BASE, (void*)&__start__me_section, me_section_size);  
+  sceKernelDcacheWritebackInvalidateAll();
   // reset and start me
-  vrg(0xBC10004C) = 0b100;
-  asm volatile("sync");
-  vrg(0xBC10004C) = 0x0;
+  hw(0xBC10004C) = 0x04;
+  hw(0xBC10004C) = 0x00;
   asm volatile("sync");
   return 0;
 }
 
 // function used to hold the mutex in the main loop as a proof
-bool releaseMutex() {
+bool holdMutex() {
   static u32 hold = 100;
   if (hold-- > 0) {
     return false;
@@ -127,8 +148,18 @@ void exitSample(const char* const str) {
   pspDebugScreenClear();
   pspDebugScreenSetXY(0, 1);
   pspDebugScreenPrintf(str);
-  sceKernelDelayThread(1000000);
+  sceKernelDelayThread(500000);
   sceKernelExitGame();
+}
+
+static void meWaitExit() {
+  // make sure the mutex is unlocked
+  kcall((FCall)(CACHED_KERNEL_MASK | (u32)&unlock));
+  // wait the me to exit
+  meExit = 1;
+  do {
+    asm volatile("sync");
+  } while (meExit < 2);
 }
 
 int main() {
@@ -140,7 +171,10 @@ int main() {
     return 0;
   }
   
-  // Init me before user mem initialisation
+  // allocate shared variables
+  meGetUncached32(&shared, 2);
+  
+  // init me before user mem initialisation
   kcall(&initMe);
   
   // to use DCWBInv Range, 64-byte alignment is required (not necessary while using DCWBInv All)
@@ -153,14 +187,14 @@ int main() {
   bool switchMessage = false;
 
   // start the process on the Me just before the main loop
-  vrg(0x40000000 | (u32)&meStart) = true;
+  meStart = true;
   do {
 
     // invalidate cache, forcing next read to fetch from memory
     sceKernelDcacheInvalidateRange((void*)mem, sizeof(u32) * 4);
     
     // functions that use spinlock, seem to need to be invoked with a kernel mask
-    if(!kcall((FCall)(0x80000000 | (u32)&tryLock))) {
+    if(!kcall((FCall)(CACHED_KERNEL_MASK | (u32)&tryLock))) {
       switchMessage = false;
       if (mem[1] > 50) {
         switchMessage = true;
@@ -170,8 +204,8 @@ int main() {
       // sceKernelDelayThread(10000);
       
       // proof to visualize the release of the mutex and its effect on the counter (mem[0]) running on the Me
-      if (releaseMutex()) {
-        kcall((FCall)(0x80000000 | (u32)&unlock));
+      if (!holdMutex()) {
+        kcall((FCall)(CACHED_KERNEL_MASK | (u32)&unlock));
       }
     }
     
@@ -179,11 +213,15 @@ int main() {
     sceKernelDcacheWritebackInvalidateRange((void*)mem, sizeof(u32) * 4);
 
     sceCtrlPeekBufferPositive(&ctl, 1);
+    
     pspDebugScreenSetXY(0, 1);
-    pspDebugScreenPrintf("                                                   ");
-    pspDebugScreenSetXY(0, 1);
-    pspDebugScreenPrintf("Counters %u; %u; %u; %u", mem[0], mem[1], mem[2], counter++);
+    pspDebugScreenPrintf("Sc counter %u   ", counter++);
     pspDebugScreenSetXY(0, 2);
+    pspDebugScreenPrintf("Me counter %u   ", mem[0]);
+    pspDebugScreenSetXY(0, 3);
+    pspDebugScreenPrintf("Shared counters %u, %u  ", mem[1], mem[2]);
+    
+    pspDebugScreenSetXY(0, 4);
     if (switchMessage) {
       pspDebugScreenPrintf("Hello!");
     } else {
@@ -192,8 +230,9 @@ int main() {
     sceDisplayWaitVblankStart();
   } while(!(ctl.Buttons & PSP_CTRL_HOME));
   
-  // exit me
-  meExit();
+  // exit me, clean memory
+  meWaitExit();
+  meGetUncached32(&shared, 0);
   free((void*)mem);
   
   exitSample("Exiting...");
