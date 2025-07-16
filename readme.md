@@ -6,6 +6,12 @@ This sample code wouldn't have been possible without the resources from [uofw on
 Thanks especially to **crazyc** from ps2dev.org, without whom the use of the Media Engine in the community would be far more difficult.
 Thanks to all developers and contributors who have kept the scene alive and to those who continue to do so.
 
+## build
+
+```bash
+make clean; make;
+```
+
 Other indispensable resources:
 - [PSPDev on GitHub](https://github.com/pspdev)
 
